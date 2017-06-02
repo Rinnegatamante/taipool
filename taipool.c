@@ -87,7 +87,7 @@ static void* _taipool_extend_block(void* ptr, size_t size){
 	// Checking if enough contiguous blocks are available
 	while (extra_size > 0){
 		if (next_block->used) return NULL;
-		size -= (next_block->size + sizeof(mempool_block_hdr));
+		extra_size -= (next_block->size + sizeof(mempool_block_hdr));
 		next_block = (mempool_block_hdr*)(next_block + sizeof(mempool_block_hdr) + next_block->size);
 	}
 	
