@@ -17,7 +17,6 @@ typedef struct mempool_block_hdr{
 static void* _taipool_alloc_block(size_t size){
 	int i = 0;
 	mempool_block_hdr* hdr = (mempool_block_hdr*)mempool_addr;
-	uint8_t* pool_ptr = (uint8_t*)mempool_addr;
 	
 	// Checking for a big enough free memblock
 	while (i < mempool_size){
@@ -30,7 +29,7 @@ static void* _taipool_alloc_block(size_t size){
 				hdr->size = size;
 				
 				// Splitting blocks
-				mempool_block_hdr* new_hdr = (mempool_block_hdr*)&pool_ptr[i + sizeof(mempool_block_hdr) + size];
+				mempool_block_hdr* new_hdr = (mempool_block_hdr*)(mempool_addr + i + sizeof(mempool_block_hdr) + size);
 				new_hdr->used = 0;
 				new_hdr->size = old_size - size - sizeof(mempool_block_hdr);
 				
@@ -41,8 +40,7 @@ static void* _taipool_alloc_block(size_t size){
 		
 		// Jumping to next block
 		i += hdr->size + sizeof(mempool_block_hdr);
-		pool_ptr = (uint8_t*)(mempool_addr + i);
-		hdr = (mempool_block_hdr*)pool_ptr;
+		hdr = (mempool_block_hdr*)(mempool_addr + i);
 		
 	}
 	return NULL;
@@ -59,7 +57,6 @@ static void _taipool_free_block(void* ptr){
 static void _taipool_merge_blocks(){
 	int i = 0;
 	mempool_block_hdr* hdr = (mempool_block_hdr*)mempool_addr;
-	uint8_t* pool_ptr = (uint8_t*)mempool_addr;
 	mempool_block_hdr* previousBlock = NULL;
 	
 	while (i < mempool_size){
@@ -76,8 +73,7 @@ static void _taipool_merge_blocks(){
 		
 		// Jumping to next block
 		i += hdr->size + sizeof(mempool_block_hdr);
-		pool_ptr = (uint8_t*)(mempool_addr + i);
-		hdr = (mempool_block_hdr*)pool_ptr;
+		hdr = (mempool_block_hdr*)(mempool_addr + i);
 		
 	}
 }
