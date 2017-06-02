@@ -14,6 +14,7 @@ void taipool_term(void);
 
 /*
  *  Returns currently available free space on mempool
+ * NOTE: Memory can be segmented so even if enough free space should be available, a taipool_alloc could fail
  */
 size_t taipool_get_free_space(void);
 
@@ -26,5 +27,10 @@ void taipool_reset(void);
  *  Allocate a memory block on mempool
  */
 void* taipool_alloc(size_t size);
+
+/*
+ *  Free a memory block on mempool
+ */
+void taipool_free(void* ptr);
 
 #endif
