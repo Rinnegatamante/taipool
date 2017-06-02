@@ -7,7 +7,7 @@ static SceUID mempool_id = 0;
 static uint32_t mempool_size = 0;
 static uint32_t mempool_free = 0;
 
-// memblock struct
+// memblock header struct
 typedef struct mempool_block_hdr{
 	uint8_t used;
 	uint32_t size;
@@ -96,6 +96,7 @@ void taipool_term(void){
 		sceKernelDeleteThread(mempool_id);
 		mempool_addr = NULL;
 		mempool_size = 0;
+		mempool_free = 0;
 	}
 }
 
