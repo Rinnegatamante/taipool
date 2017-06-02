@@ -29,6 +29,16 @@ void taipool_reset(void);
 void* taipool_alloc(size_t size);
 
 /*
+ *  Reallocate an already allocated memory block on mempool
+ */
+void* taipool_realloc(void* ptr, size_t size)
+
+/*
+ *  Allocate a memory block on mempool and zero initialize it
+ */
+void* taipool_calloc(size_t num, size_t size);
+
+/*
  *  Free a memory block on mempool
  */
 void taipool_free(void* ptr);
