@@ -106,6 +106,7 @@ static void _taipool_compact_block(void* ptr, size_t size){
 	mempool_block_hdr* new_block = (mempool_block_hdr*)(ptr + hdr->size);
 	new_block->used = 0;
 	new_block->size = old_size - size - sizeof(mempool_block_hdr);
+	mempool_free += new_block->size;
 }
 
 // Resets taipool mempool
