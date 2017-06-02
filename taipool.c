@@ -111,10 +111,12 @@ static void _taipool_compact_block(void* ptr, size_t size){
 
 // Resets taipool mempool
 void taipool_reset(void){
-	mempool_block_hdr* master_block = (mempool_block_hdr*)mempool_addr;
-	master_block->used = 0;
-	master_block->size = mempool_size - sizeof(mempool_block_hdr);
-	mempool_free = master_block->size;
+	if (mempool_addr != NULL){
+		mempool_block_hdr* master_block = (mempool_block_hdr*)mempool_addr;
+		master_block->used = 0;
+		master_block->size = mempool_size - sizeof(mempool_block_hdr);
+		mempool_free = master_block->size;
+	}
 }
 
 // Terminate taipool mempool
@@ -158,7 +160,7 @@ void taipool_free(void* ptr){
 
 // Allocates a new block on taipool mempool
 void* taipool_alloc(size_t size){
-	if (size >= mempool_free) return _taipool_alloc_block(size);
+	if (size <= mempool_free) return _taipool_alloc_block(size);
 	else return NULL;
 }
 
