@@ -43,4 +43,22 @@ void* taipool_calloc(size_t num, size_t size);
  */
 void taipool_free(void* ptr);
 
+/*
+ * By enabling TAIPOOL_AS_STDLIB flag, taipool functions will be mapped as stdlib one
+ */
+#ifdef TAIPOOL_AS_STDLIB
+void free(void* ptr){
+	taipool_free(ptr);
+}
+void* malloc(size_t size){
+	return taipool_alloc(size);
+}
+void* calloc(size_t num, size_t size){
+	return taipool_calloc(num, size);
+}
+void* realloc(void* ptr, size_t size){
+	return taipool_realloc(ptr, size);
+}
+#endif
+
 #endif
