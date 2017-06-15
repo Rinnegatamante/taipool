@@ -8,12 +8,23 @@ static void* mempool_addr = NULL;
 static SceUID mempool_id = 0;
 static size_t mempool_size = 0;
 static size_t mempool_free = 0;
+static SceUID taipool_sema = 0;
 
 // memblock header struct
 typedef struct mempool_block_hdr{
 	uint8_t used;
 	size_t size;
 } mempool_block_hdr;
+
+// Locks taipool mempool access (blocking)
+static void _taipool_lock_access(){
+	sceKernelWaitSema(taipool_sema, 1, NULL);
+}
+
+// Unlocks taipool mempool access
+static void _taipool_unlock_access(){
+	sceKernelSignalSema(taipool_sema, 1);
+}
 
 // Allocks a new block on mempool
 static void* _taipool_alloc_block(size_t size){
@@ -114,17 +125,21 @@ static void _taipool_compact_block(void* ptr, size_t size){
 // Resets taipool mempool
 void taipool_reset(void){
 	if (mempool_addr != NULL){
+		_taipool_lock_access();
 		mempool_block_hdr* master_block = (mempool_block_hdr*)mempool_addr;
 		master_block->used = 0;
 		master_block->size = mempool_size - sizeof(mempool_block_hdr);
 		mempool_free = master_block->size;
+		_taipool_unlock_access();
 	}
 }
 
 // Terminate taipool mempool
 void taipool_term(void){
 	if (mempool_addr != NULL){
+		_taipool_lock_access();
 		sceKernelDeleteThread(mempool_id);
+		sceKernelDeleteSema(taipool_sema);
 		mempool_addr = NULL;
 		mempool_size = 0;
 		mempool_free = 0;
@@ -148,7 +163,10 @@ int taipool_init(size_t size){
 		
 			// Initializing mempool as a single block
 			taipool_reset();
-		
+			
+			// Setting up a semaphore for mutual exclusion
+			taipool_sema = sceKernelCreateSema("taipool_sema", 0, 1, 1, 0);
+			
 			return 0;
 		}
 	}
@@ -157,30 +175,38 @@ int taipool_init(size_t size){
 
 // Frees a block on taipool mempool
 void taipool_free(void* ptr){
+	_taipool_lock_access();
 	_taipool_free_block(ptr);
 	_taipool_merge_blocks();
+	_taipool_unlock_access();
 }
 
 // Allocates a new block on taipool mempool
 void* taipool_alloc(size_t size){
-	if (size <= mempool_free) return _taipool_alloc_block(size);
-	else return NULL;
+	_taipool_lock_access();
+	void* res = NULL;
+	if (size <= mempool_free) res = _taipool_alloc_block(size);
+	_taipool_unlock_access();
+	return res;
 }
 
 // Allocates a new block on taipool mempool and zero-initialize it
 void* taipool_calloc(size_t num, size_t size){
+	_taipool_lock_access();
 	void* res = taipool_alloc(num * size);
 	if (res != NULL) memset(res, 0, num * size);
+	_taipool_unlock_access();
 	return res;
 }
 
 // Reallocates a currently allocated block on taipool mempool
 void* taipool_realloc(void* ptr, size_t size){
+    _taipool_lock_access();
 	mempool_block_hdr* hdr = (mempool_block_hdr*)(ptr - sizeof(mempool_block_hdr));
 	void* res = NULL;
 	if (hdr->size < size){ // Increasing size
 	
-		// Trying to extend the block with contiguous blocks (right side)
+		// Trying to extend the block with successive contiguous blocks
 		void* res = _taipool_extend_block(ptr, size);
 		if (res == NULL){
 		
@@ -207,8 +233,9 @@ void* taipool_realloc(void* ptr, size_t size){
 	}else{ // Reducing size
 		_taipool_compact_block(ptr, size);
 		_taipool_merge_blocks();
-		return ptr;
+		res = ptr;
 	}
+	_taipool_unlock_access();
 	return res;
 }
 
