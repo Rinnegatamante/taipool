@@ -1,7 +1,9 @@
 #include <vitasdk.h>
 #include "taipool.h"
+#include <string.h>
 
 #define POOL_PADDING 0x100 // Difference between stack pointer and mempool start in bytes
+#define TAIPOOL_ALIGNMENT 8
 
 static int dummy_thread(SceSize args, void *argp){return 0;}
 static void* mempool_addr = NULL;
@@ -15,6 +17,12 @@ typedef struct mempool_block_hdr {
 	uint8_t used;
 	size_t size;
 } mempool_block_hdr;
+
+static int _taipool_align_size(size_t size, size_t* aligned_size) {
+	if (size > SIZE_MAX - (TAIPOOL_ALIGNMENT - 1)) return -1;
+	*aligned_size = (size + TAIPOOL_ALIGNMENT - 1) & ~(size_t)(TAIPOOL_ALIGNMENT - 1);
+	return 0;
+}
 
 // Locks taipool mempool access (blocking)
 static void _taipool_lock_access() {
@@ -100,32 +108,55 @@ static void _taipool_merge_blocks() {
 
 // Extend an allocated block by a given size
 static void* _taipool_extend_block(void* ptr, size_t size) {
-	mempool_block_hdr* hdr = (mempool_block_hdr*)(ptr - sizeof(mempool_block_hdr));
-	mempool_block_hdr* next_block = (mempool_block_hdr*)(ptr + hdr->size);
-	size_t extra_size = size - hdr->size;
-	
-	// Checking if enough contiguous blocks are available
-	while (extra_size > 0) {
-		if (next_block->used) return NULL;
-		extra_size -= (next_block->size + sizeof(mempool_block_hdr));
-		next_block = (mempool_block_hdr*)(next_block + sizeof(mempool_block_hdr) + next_block->size);
+	uint8_t* block_end;
+	uint8_t* pool_end = (uint8_t*)mempool_addr + mempool_size;
+	mempool_block_hdr* hdr = (mempool_block_hdr*)((uint8_t*)ptr - sizeof(mempool_block_hdr));
+	mempool_block_hdr* next_block;
+	size_t combined_size;
+	size_t remaining;
+
+	block_end = (uint8_t*)ptr + hdr->size;
+	if (block_end >= pool_end || (size_t)(pool_end - block_end) < sizeof(mempool_block_hdr)) return NULL;
+
+	next_block = (mempool_block_hdr*)block_end;
+	if (next_block->used) return NULL;
+	if (next_block->size > (size_t)(pool_end - block_end) - sizeof(mempool_block_hdr)) return NULL;
+
+	combined_size = hdr->size + sizeof(mempool_block_hdr) + next_block->size;
+	if (combined_size < size) return NULL;
+
+	remaining = combined_size - size;
+	if (remaining >= sizeof(mempool_block_hdr) + TAIPOOL_ALIGNMENT) {
+		mempool_block_hdr* new_block;
+		size_t old_size = hdr->size;
+		hdr->size = size;
+		new_block = (mempool_block_hdr*)((uint8_t*)ptr + size);
+		new_block->used = 0;
+		new_block->size = remaining - sizeof(mempool_block_hdr);
+		mempool_free -= size - old_size;
+	} else {
+		hdr->size = combined_size;
+		mempool_free -= next_block->size;
 	}
-	
-	// Extending current block
-	hdr->size = size;
-	mempool_free -= extra_size;
 	
 	return ptr;
 }
 
 // Compact an allocated block to a given size
 static void _taipool_compact_block(void* ptr, size_t size) {
-	mempool_block_hdr* hdr = (mempool_block_hdr*)(ptr - sizeof(mempool_block_hdr));
+	mempool_block_hdr* hdr = (mempool_block_hdr*)((uint8_t*)ptr - sizeof(mempool_block_hdr));
 	size_t old_size = hdr->size;
+	size_t remaining;
+	mempool_block_hdr* new_block;
+
+	if (size >= old_size) return;
+	remaining = old_size - size;
+	if (remaining < sizeof(mempool_block_hdr) + TAIPOOL_ALIGNMENT) return;
+
 	hdr->size = size;
-	mempool_block_hdr* new_block = (mempool_block_hdr*)(ptr + hdr->size);
+	new_block = (mempool_block_hdr*)((uint8_t*)ptr + hdr->size);
 	new_block->used = 0;
-	new_block->size = old_size - (size + sizeof(mempool_block_hdr));
+	new_block->size = remaining - sizeof(mempool_block_hdr);
 	mempool_free += new_block->size;
 }
 
@@ -169,12 +200,22 @@ int taipool_init(size_t size) {
 			mempool_addr = mempool_info.stack + POOL_PADDING;
 			mempool_id = pool_id;
 			mempool_size = mempool_info.stackSize - POOL_PADDING;
-		
-			// Initializing mempool as a single block
-			taipool_reset();
 			
 			// Setting up a semaphore for mutual exclusion
 			taipool_sema = sceKernelCreateSema("taipool_sema", 0, 1, 1, 0);
+			if (taipool_sema < 0) {
+				SceUID error = taipool_sema;
+				sceKernelDeleteThread(mempool_id);
+				mempool_addr = NULL;
+				mempool_id = 0;
+				mempool_size = 0;
+				mempool_free = 0;
+				taipool_sema = 0;
+				return error;
+			}
+
+			// Initializing mempool as a single block
+			taipool_reset();
 			
 			return 0;
 		}
@@ -201,44 +242,38 @@ void* taipool_alloc(size_t size) {
 
 // Allocates a new block on taipool mempool and zero-initialize it
 void* taipool_calloc(size_t num, size_t size) {
-	void* res = taipool_alloc(num * size);
-	if (res != NULL) memset(res, 0, num * size);
+	size_t total;
+	void* res;
+
+	if (size != 0 && num > SIZE_MAX / size) return NULL;
+	total = num * size;
+	res = taipool_alloc(total);
+	if (res != NULL) memset(res, 0, total);
 	return res;
 }
 
 // Reallocates a currently allocated block on taipool mempool
 void* taipool_realloc(void* ptr, size_t size) {
-    _taipool_lock_access();
-	mempool_block_hdr* hdr = (mempool_block_hdr*)(ptr - sizeof(mempool_block_hdr));
+	size_t aligned_size;
+	mempool_block_hdr* hdr;
 	void* res = NULL;
-	if (hdr->size < size) { // Increasing size
-	
-		// Trying to extend the block with successive contiguous blocks
-		void* res = _taipool_extend_block(ptr, size);
+
+	if (_taipool_align_size(size, &aligned_size) < 0) return NULL;
+
+	_taipool_lock_access();
+	hdr = (mempool_block_hdr*)((uint8_t*)ptr - sizeof(mempool_block_hdr));
+	if (hdr->size < aligned_size) { // Increasing size
+		res = _taipool_extend_block(ptr, aligned_size);
 		if (res == NULL) {
-		
-			// Trying to extend the block by fully relocating it
-			res = taipool_alloc(size);
+			res = _taipool_alloc_block(aligned_size);
 			if (res != NULL) {
 				memcpy(res, ptr, hdr->size);
-				taipool_free(ptr);
-			} else {
-			
-				// Trying to extend the block with contiguous blocks
-				size_t orig_size = hdr->size;
-				taipool_free(ptr);
-				res = taipool_alloc(size);
-				if (res == NULL) {
-					hdr->used = 1;
-					hdr->size = orig_size;
-				} else if (res != ptr) {
-					memmove(res, ptr, orig_size);
-				}
-				
+				_taipool_free_block(ptr);
+				_taipool_merge_blocks();
 			}
 		}
 	} else { // Reducing size
-		_taipool_compact_block(ptr, size);
+		_taipool_compact_block(ptr, aligned_size);
 		_taipool_merge_blocks();
 		res = ptr;
 	}
