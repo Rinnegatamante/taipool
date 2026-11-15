@@ -11,18 +11,18 @@ static size_t mempool_free = 0;
 static SceUID taipool_sema = 0;
 
 // memblock header struct
-typedef struct mempool_block_hdr{
+typedef struct mempool_block_hdr {
 	uint8_t used;
 	size_t size;
 } mempool_block_hdr;
 
 // Locks taipool mempool access (blocking)
-static void _taipool_lock_access(){
+static void _taipool_lock_access() {
 	sceKernelWaitSema(taipool_sema, 1, NULL);
 }
 
 // Unlocks taipool mempool access
-static void _taipool_unlock_access(){
+static void _taipool_unlock_access() {
 	sceKernelSignalSema(taipool_sema, 1);
 }
 
@@ -31,22 +31,29 @@ static void* _taipool_alloc_block(size_t size) {
 	size_t i = 0;
 	mempool_block_hdr* hdr = (mempool_block_hdr*)mempool_addr;
 	
+	// Always align to 8 bytes
+	size = (size + 7) & ~(size_t)7;
+	
 	// Checking for a big enough free memblock
-	while (i < mempool_size){
-		if (!hdr->used){
-			if (hdr->size >= size){
+	while (i < mempool_size) {
+		if (!hdr->used) {
+			if (hdr->size >= size) {
 				
 				// Reserving memory
 				hdr->used = 1;
 				size_t old_size = hdr->size;
-				hdr->size = size;
 				
 				// Splitting blocks
-				mempool_block_hdr* new_hdr = (mempool_block_hdr*)(mempool_addr + i + sizeof(mempool_block_hdr) + size);
-				new_hdr->used = 0;
-				new_hdr->size = old_size - (size + sizeof(mempool_block_hdr));
+				if (old_size - size >= sizeof(mempool_block_hdr) + 8) {
+					hdr->size = size;
+					mempool_block_hdr* new_hdr = (mempool_block_hdr*)(mempool_addr + i + sizeof(mempool_block_hdr) + size);
+					new_hdr->used = 0;
+					new_hdr->size = old_size - (size + sizeof(mempool_block_hdr));
+					mempool_free -= (sizeof(mempool_block_hdr) + size);
+				} else {
+					mempool_free -= old_size;
+				}
 				
-				mempool_free -= (sizeof(mempool_block_hdr) + size);
 				return (void*)(mempool_addr + i + sizeof(mempool_block_hdr));
 			}
 		}
