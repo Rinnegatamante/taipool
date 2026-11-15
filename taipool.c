@@ -27,7 +27,7 @@ static void _taipool_unlock_access(){
 }
 
 // Allocks a new block on mempool
-static void* _taipool_alloc_block(size_t size){
+static void* _taipool_alloc_block(size_t size) {
 	size_t i = 0;
 	mempool_block_hdr* hdr = (mempool_block_hdr*)mempool_addr;
 	
@@ -60,27 +60,27 @@ static void* _taipool_alloc_block(size_t size){
 }
 
 // Frees a block on mempool
-static void _taipool_free_block(void* ptr){
+static void _taipool_free_block(void* ptr) {
 	mempool_block_hdr* hdr = (mempool_block_hdr*)(ptr - sizeof(mempool_block_hdr));
 	hdr->used = 0;
 	mempool_free += hdr->size;
 }
 
 // Merge contiguous free blocks in a bigger one
-static void _taipool_merge_blocks(){
+static void _taipool_merge_blocks() {
 	size_t i = 0;
 	mempool_block_hdr* hdr = (mempool_block_hdr*)mempool_addr;
 	mempool_block_hdr* previousBlock = NULL;
 	
-	while (i < mempool_size){
-		if (!hdr->used){
-			if (previousBlock != NULL){
+	while (i < mempool_size) {
+		if (!hdr->used) {
+			if (previousBlock != NULL) {
 				previousBlock->size += (hdr->size + sizeof(mempool_block_hdr));
 				mempool_free += sizeof(mempool_block_hdr); 
-			}else{
+			} else {
 				previousBlock = hdr;
 			}
-		}else{
+		} else {
 			previousBlock = NULL;
 		}
 		
@@ -92,13 +92,13 @@ static void _taipool_merge_blocks(){
 }
 
 // Extend an allocated block by a given size
-static void* _taipool_extend_block(void* ptr, size_t size){
+static void* _taipool_extend_block(void* ptr, size_t size) {
 	mempool_block_hdr* hdr = (mempool_block_hdr*)(ptr - sizeof(mempool_block_hdr));
 	mempool_block_hdr* next_block = (mempool_block_hdr*)(ptr + hdr->size);
 	size_t extra_size = size - hdr->size;
 	
 	// Checking if enough contiguous blocks are available
-	while (extra_size > 0){
+	while (extra_size > 0) {
 		if (next_block->used) return NULL;
 		extra_size -= (next_block->size + sizeof(mempool_block_hdr));
 		next_block = (mempool_block_hdr*)(next_block + sizeof(mempool_block_hdr) + next_block->size);
@@ -112,7 +112,7 @@ static void* _taipool_extend_block(void* ptr, size_t size){
 }
 
 // Compact an allocated block to a given size
-static void _taipool_compact_block(void* ptr, size_t size){
+static void _taipool_compact_block(void* ptr, size_t size) {
 	mempool_block_hdr* hdr = (mempool_block_hdr*)(ptr - sizeof(mempool_block_hdr));
 	size_t old_size = hdr->size;
 	hdr->size = size;
@@ -123,8 +123,8 @@ static void _taipool_compact_block(void* ptr, size_t size){
 }
 
 // Resets taipool mempool
-void taipool_reset(void){
-	if (mempool_addr != NULL){
+void taipool_reset(void) {
+	if (mempool_addr != NULL) {
 		_taipool_lock_access();
 		mempool_block_hdr* master_block = (mempool_block_hdr*)mempool_addr;
 		master_block->used = 0;
@@ -135,8 +135,8 @@ void taipool_reset(void){
 }
 
 // Terminate taipool mempool
-void taipool_term(void){
-	if (mempool_addr != NULL){
+void taipool_term(void) {
+	if (mempool_addr != NULL) {
 		_taipool_lock_access();
 		sceKernelDeleteThread(mempool_id);
 		sceKernelDeleteSema(taipool_sema);
@@ -147,16 +147,18 @@ void taipool_term(void){
 }
 
 // Initialize taipool mempool
-int taipool_init(size_t size){
+int taipool_init(size_t size) {
 	
-	if (mempool_addr != NULL) taipool_term();
+	if (mempool_addr != NULL) {
+		taipool_term();
+	}
 	
 	// Creating a thread in order to reserve requested memory
 	SceUID pool_id = sceKernelCreateThread("mempool_thread", dummy_thread, 0x40, size, 0, 0, NULL);
-	if (pool_id >= 0){
+	if (pool_id >= 0) {
 		SceKernelThreadInfo mempool_info;
 		mempool_info.size = sizeof(SceKernelThreadInfo);
-		if (!sceKernelGetThreadInfo(pool_id, &mempool_info)){
+		if (!sceKernelGetThreadInfo(pool_id, &mempool_info)) {
 			mempool_addr = mempool_info.stack + POOL_PADDING;
 			mempool_id = pool_id;
 			mempool_size = mempool_info.stackSize - POOL_PADDING;
@@ -174,7 +176,7 @@ int taipool_init(size_t size){
 }
 
 // Frees a block on taipool mempool
-void taipool_free(void* ptr){
+void taipool_free(void* ptr) {
 	_taipool_lock_access();
 	_taipool_free_block(ptr);
 	_taipool_merge_blocks();
@@ -182,7 +184,7 @@ void taipool_free(void* ptr){
 }
 
 // Allocates a new block on taipool mempool
-void* taipool_alloc(size_t size){
+void* taipool_alloc(size_t size) {
 	_taipool_lock_access();
 	void* res = NULL;
 	if (size <= mempool_free) res = _taipool_alloc_block(size);
@@ -191,46 +193,44 @@ void* taipool_alloc(size_t size){
 }
 
 // Allocates a new block on taipool mempool and zero-initialize it
-void* taipool_calloc(size_t num, size_t size){
-	_taipool_lock_access();
+void* taipool_calloc(size_t num, size_t size) {
 	void* res = taipool_alloc(num * size);
 	if (res != NULL) memset(res, 0, num * size);
-	_taipool_unlock_access();
 	return res;
 }
 
 // Reallocates a currently allocated block on taipool mempool
-void* taipool_realloc(void* ptr, size_t size){
+void* taipool_realloc(void* ptr, size_t size) {
     _taipool_lock_access();
 	mempool_block_hdr* hdr = (mempool_block_hdr*)(ptr - sizeof(mempool_block_hdr));
 	void* res = NULL;
-	if (hdr->size < size){ // Increasing size
+	if (hdr->size < size) { // Increasing size
 	
 		// Trying to extend the block with successive contiguous blocks
 		void* res = _taipool_extend_block(ptr, size);
-		if (res == NULL){
+		if (res == NULL) {
 		
 			// Trying to extend the block by fully relocating it
 			res = taipool_alloc(size);
-			if (res != NULL){
+			if (res != NULL) {
 				memcpy(res, ptr, hdr->size);
 				taipool_free(ptr);
-			}else{
+			} else {
 			
 				// Trying to extend the block with contiguous blocks
 				size_t orig_size = hdr->size;
 				taipool_free(ptr);
 				res = taipool_alloc(size);
-				if (res == NULL){
+				if (res == NULL) {
 					hdr->used = 1;
 					hdr->size = orig_size;
-				}else if (res != ptr){
+				} else if (res != ptr) {
 					memmove(res, ptr, orig_size);
 				}
 				
 			}
 		}
-	}else{ // Reducing size
+	} else { // Reducing size
 		_taipool_compact_block(ptr, size);
 		_taipool_merge_blocks();
 		res = ptr;
